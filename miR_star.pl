@@ -2,7 +2,10 @@
 
 =head1
 
-predict miRNA star sequence
+  predict miRNA star sequence
+
+  modified by Kentnf
+  20140723 : fix several bugs 
 
 =cut
 
@@ -13,7 +16,7 @@ use IO::File;
 use Getopt::Long;
 
 my $usage = qq'
-usage: ex_miR_star_bowtie.pl [-a miRNA_sql_output -b miRNA_hairpin_sql | -c hairpin ] -d sRNA_seq -e sRNA_expr -f output_file
+usage: $0 [-a miRNA_sql_output -b miRNA_hairpin_sql | -c hairpin ] -d sRNA_seq -e sRNA_expr -f output_file
  
 	-a miRNA_sql		miRNA_sql_output file	
 	-b miRNA_hairpin_sql 	miRNA_hairpin_sql file
@@ -53,15 +56,11 @@ my $BOWTIE_PATH = ${FindBin::RealBin};
 my $TEMP_PATH = ".";
 my $gap = 2;				# distance from end position of hairpin
 
-#################################################################
-
-
+# set temp files base on system time	
 my $star_candidate = $TEMP_PATH."/"."Star_candidate.";
-
 my $temp_fas = $TEMP_PATH."/"."bowtie.tmp.fas.";
 my $temp_db = $TEMP_PATH."/"."bowtie.tmp.db.";
 unless ($hairpin) { $hairpin = $TEMP_PATH."/"."HAIRPINC"; }
-
 
 my ($second, $minute, $hour);
 ($second, $minute, $hour) = localtime(); 
@@ -73,25 +72,29 @@ my $fid = $second.$minute.$hour;
 #################################################################
 # constructure temp hairpin sequence file 			#
 #################################################################
+my %ms;	# key: miRNA new ID; value: miRNA old ID from small RNA sequence;
+my %sm;	# reverse of ms
 if ($miRNA_sql && $hairpin_sql)
 {
-	my %m; # key: miRNA new ID; value: miRNA old ID from small RNA sequence;
 	my $in1 = IO::File->new($miRNA_sql) || die "Can not open miRNA sql file $miRNA_sql $!\n";
 	while(<$in1>)
 	{
 		my @a = split(/\t/, $_);
-		$m{$a[0]} = $a[1];
+		$ms{$a[0]} = $a[1];
+		$sm{$a[1]} = $a[0];
 	}
 	$in1->close;
 
-	# H000001 Test01029       Chr1    13252204        13252419        193     +       Hairpin_Sequence        -191.60
+	# pre-miR miR       Ref   Start     End       miR start  Stand(?)
+	# H000001 miR01029  Chr1  13252204  13252419  193        +         Hairpin_Sequence  -191.60
 	my $out = IO::File->new(">".$temp_fas) || die "Can not open temp fasta file $temp_fas $!\n";	
 	my $out2 = IO::File->new(">".$hairpin) || die "Can not open hairpin file $hairpin $!\n";
 	my $in2 = IO::File->new($hairpin_sql) || die "Can not open miRNA hairpin sql file $hairpin_sql $!\n";
 	while(<$in2>)
 	{
         	my @b = split(/\t/, $_);
-        	$b[1] = $m{$b[1]};
+		die "[ERR]Undef miR ID for sRNA $b[1]\n" unless defined $ms{$b[1]};
+        	$b[1] = $ms{$b[1]};
 		print $out2 join("\t", @b);
 		my $len_seq = length($b[7]);
                 print $out ">$b[0]_$b[1]_$b[5]_$len_seq\n";
@@ -134,17 +137,24 @@ else
 #################################################################
 my $bowtie_db_out = `bowtie-build $temp_fas $temp_db`;
 my $bowtie_run_out = `bowtie -v 0 -a -f $temp_db $sRNA_seq`;
+chomp($bowtie_run_out);
+if (length($bowtie_run_out) < 1) { 
+	die "[ERR]no alignment\n";
+}
 
 #################################################################
 # convert bowtie run output to star candidate 			#
 #################################################################
-open OUTFILE, ">$star_candidate" || die "Cannot Open start candidate file $!\n";
+open (OUTFILE, ">$star_candidate") || die "Cannot Open start candidate file $!\n";
 
 my @list = split(/\n/, $bowtie_run_out);
-foreach my $line (@list) {
-      chomp $line;
-      my ($sRNA, $strand, $miR, $loc, $seq, $sc, $mismatch) = split(/\t/, $line);
-      if ($strand eq "+") {
+foreach my $line (@list) 
+{
+	chomp $line;
+	# read_id  strand  pre-miR  pos(0-base)  read_seq  qual  mismatch
+	my ($sRNA, $strand, $miR, $loc, $seq, $sc, $mismatch) = split(/\t/, $line);
+	if ($strand eq "+") 
+	{
   		my $sRNA_s = $loc+1;
   		my $sRNA_e = $loc+length($seq);
 
@@ -154,10 +164,10 @@ foreach my $line (@list) {
   		#$sRNA_s = $L[2];
   		#$sRNA_e = $L[3];
 
-  		my @miR_L = split("_", $miR);
+  		my @miR_L = split("_", $miR); # pre-miR  miR  pos(miR on pre-miR)  pre-miR_len
   		my $miR_id = $miR_L[0];
   		my $sRNA_a = $miR_L[1];
-  		my $miR_s = $miR_L[2];
+  		my $miR_s = $miR_L[2];	# should be miR on pre-miR
   		my $miR_l = $miR_L[3];
 
   		my $miR_e = $miR_l - $gap;
@@ -174,7 +184,7 @@ foreach my $line (@list) {
         	}
   	}
 }
-close OUTFILE;
+close(OUTFILE);
 
 system "rm $TEMP_PATH/bowtie.tmp.*";
 
@@ -191,9 +201,9 @@ my $len_diff_cutoff = 2;
 
 #################################################################
 
-my %miRNA_seq = {};
-my %sRNA_seq = {};
-my %sRNA_freq = {};
+my %miRNA_seq = {};	# key: pre-miR ID, value: pre-miR seq
+my %sRNA_seq = {};	# key: sRNA ID, value: sRNA seq
+my %sRNA_freq = {};	# key: sRNA ID, value: expression(RPM)
 
 #################################################################
 # $hairpin sequence to hash					#
@@ -318,7 +328,7 @@ my @exp = split(/\t/, $sRNA_freq{'title'});
 my $exp_title = '';
 foreach my $sample (@exp) { $exp_title.="\t$sample:A\t$sample:B\t$sample:ratio"; }
 
-print OUT "#pre_miR_id\tsRNA_a\tsRNA_b\tmiR_start\tmiR_len\tsRNA_start\tsRNA_end$exp_title\n";
+print OUT "#Pre-miR ID\tPre-miR seq\tmiR ID\tmiR Len\tmiR seq\tmiR start\tmiR end\tsRNA ID\tsRNA Len\tsRNA seq\tsRNA start\tsRNA end$exp_title\n";
 
 while(<IN>)
 {
@@ -337,6 +347,10 @@ while(<IN>)
 	my $miR_seq = $miRNA_seq{$miR_id};
 	my $sR_seq_a = $sRNA_seq{$sRNA_id_a};
 	my $sR_seq_b = $sRNA_seq{$sRNA_id_b};
+
+	die "[ERR]Undef miRNA ID $sRNA_id_a\n" unless defined $sm{$sRNA_id_a};
+	my $mid = $sm{$sRNA_id_a};
+	
 	#"$sR_seq_a\n$sR_seq_b\n";
 	
 	unless(defined $sRNA_freq{$sR_seq_a}) { die "Error in sRNA_freq\n>$sRNA_id_a\n$sR_seq_a\n"; }
@@ -345,48 +359,33 @@ while(<IN>)
 
 	my @freq_a = split("\t", $sRNA_freq{$sR_seq_a});
 	my @freq_b = split("\t", $sRNA_freq{$sR_seq_b});
+	die "[ERR]exp num not equal for miR and sRNA\n" unless (scalar(@freq_a) == scalar(@freq_b));
 
   	my $ratio_avail = 0;
 	my $ratio;
 	# code for question
 	for (my $i = 0; $i < @freq_a; $i++)
 	{
-		if ($freq_b[$i] > 0 && $freq_a[$i] / $freq_b[$i] < $ratio_cutoff)
+		if ($freq_a[$i] > 0 && $freq_b[$i] > 0)
 		{
-			#$ratio_avail = 0;
-			#last;
-		}
-
-    		if ($freq_b[$i] > 0 && $freq_a[$i] / $freq_b[$i] >= $ratio_cutoff)
-		{
-			$ratio_avail = 1;
-		}
-
-		if ($freq_b[$i] > 0 && $freq_a[$i] > 0) 
-		{
-			$ratio = $freq_a[$i] / $freq_b[$i];
-			$ratio = sprintf("%2.f", $ratio);
+			$ratio = sprintf("%.2f", ($freq_a[$i] / $freq_b[$i]));
+			if ($ratio >= $ratio_cutoff && $freq_a[$i] >= $min_freq_a_cutoff && $freq_b[$i] >= $min_freq_a_cutoff)
+			{ $ratio_avail = 1; }
 		}
 		else
 		{
-			if ($freq_a[$i] > 0)
-			{
-				$ratio = "NA";
-			}
-			else 
-			{
-				$ratio = 0;
-			}
+			$ratio = 'NA';
 		}
 		$exp_line.="\t".$freq_a[$i]."\t".$freq_b[$i]."\t".$ratio;
 	}
 
-  	my $len_a = length($sR_seq_a);
-  	my $len_b = length($sR_seq_b);
-  	my $len_diff = abs($len_a-$len_b);
+  	my $len_diff = abs(length($sR_seq_a) - length($sR_seq_b));
 
-	if ( $ratio_avail == 1 && $len_diff <= $len_diff_cutoff){
-    		print OUT $line.$exp_line."\n";		
+	if ( $ratio_avail == 1 && $len_diff <= $len_diff_cutoff)
+	{
+		print OUT $miR_id."\t".$miR_seq."\t".$mid."\t".length($sR_seq_a)."\t".$sR_seq_a."\tNA\tNA".
+			"\t".$sRNA_id_b."\t".length($sR_seq_b)."\t".$sR_seq_b."\tNA\tNA";
+    		print OUT $exp_line."\n";		
 		#print OUT join("\t", @freq_a), "\t";
 		#print OUT join("\t", @freq_b), "\n";
   	}
@@ -394,4 +393,4 @@ while(<IN>)
 close(IN);
 close(OUT);
 
-unlink($star_candidate);
+#unlink($star_candidate);
