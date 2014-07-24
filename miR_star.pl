@@ -172,7 +172,8 @@ foreach my $line (@list)
 
   		my $miR_e = $miR_l - $gap;
 
-        	if (int($miR_s) <=  $gap) {      
+        	if (int($miR_s) <=  $gap) 
+		{      
                 	if ($sRNA_e >= $miR_e) {
                         	print OUTFILE "$miR_id\t$sRNA_a\t$sRNA\t$miR_s\t$miR_l\t$sRNA_s\t$sRNA_e\n";
                 	}
@@ -194,10 +195,10 @@ system "rm $TEMP_PATH/bowtie.tmp.*";
 # Difference between miR mature length and miR star length 	#
 #################################################################
 
-my $ratio_cutoff = 5.0;
+my $ratio_cutoff = 2.0;
 my $min_freq_a_cutoff = 5;
-my $min_freq_b_cutoff = 1;
-my $len_diff_cutoff = 2;     
+my $min_freq_b_cutoff = 0;
+my $len_diff_cutoff = 3;     
 
 #################################################################
 
@@ -380,7 +381,12 @@ while(<IN>)
 		}
 		else
 		{
-			$ratio = 'NA';
+			$ratio = 'Inf';
+			if ($freq_a[$i] > 0 && $freq_a[$i] >= $min_freq_a_cutoff)
+			{
+				$ratio_avail = 1;
+				$high_exp_a = $freq_a[$i] if $freq_a[$i] > $high_exp_a;
+			}
 		}
 		$exp_line.="\t".$freq_a[$i]."\t".$freq_b[$i]."\t".$ratio;
 	}
@@ -389,6 +395,12 @@ while(<IN>)
 
 	if ( $ratio_avail == 1 && $len_diff <= $len_diff_cutoff)
 	{
+		$a[4] = $a[3] + length($sR_seq_a) - 1;
+
+		if ($a[4] > length($miR_seq)) {
+			print "[WARN]$line\n";
+		}
+
 		my $outinfo = $miR_id."\t".$miR_seq."\t".$mid."\t".length($sR_seq_a)."\t".$sR_seq_a."\t$a[3]\t$a[4]".
                         	"\t".$sRNA_id_b."\t".length($sR_seq_b)."\t".$sR_seq_b."\t$a[5]\t$a[6]";
                 $outinfo .= $exp_line."\n";
@@ -419,4 +431,4 @@ foreach my $mid (sort keys %miR_best)
 
 close(OUT);
 
-#unlink($star_candidate);
+unlink($star_candidate);
