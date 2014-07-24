@@ -5,7 +5,7 @@
   predict miRNA star sequence
 
   modified by Kentnf
-  20140723 : fix several bugs 
+  20140723 : fix several bugs, output more info, and output best miR according to expression
 
 =cut
 
@@ -330,6 +330,8 @@ foreach my $sample (@exp) { $exp_title.="\t$sample:A\t$sample:B\t$sample:ratio";
 
 print OUT "#Pre-miR ID\tPre-miR seq\tmiR ID\tmiR Len\tmiR seq\tmiR start\tmiR end\tsRNA ID\tsRNA Len\tsRNA seq\tsRNA start\tsRNA end$exp_title\n";
 
+my %miR_best;
+
 while(<IN>)
 {
   	chomp;
@@ -363,6 +365,7 @@ while(<IN>)
 
   	my $ratio_avail = 0;
 	my $ratio;
+	my $high_exp_a = 0;
 	# code for question
 	for (my $i = 0; $i < @freq_a; $i++)
 	{
@@ -370,7 +373,10 @@ while(<IN>)
 		{
 			$ratio = sprintf("%.2f", ($freq_a[$i] / $freq_b[$i]));
 			if ($ratio >= $ratio_cutoff && $freq_a[$i] >= $min_freq_a_cutoff && $freq_b[$i] >= $min_freq_a_cutoff)
-			{ $ratio_avail = 1; }
+			{ 
+				$ratio_avail = 1; 
+				$high_exp_a = $freq_a[$i] if $freq_a[$i] > $high_exp_a;
+			}
 		}
 		else
 		{
@@ -383,14 +389,34 @@ while(<IN>)
 
 	if ( $ratio_avail == 1 && $len_diff <= $len_diff_cutoff)
 	{
-		print OUT $miR_id."\t".$miR_seq."\t".$mid."\t".length($sR_seq_a)."\t".$sR_seq_a."\tNA\tNA".
-			"\t".$sRNA_id_b."\t".length($sR_seq_b)."\t".$sR_seq_b."\tNA\tNA";
-    		print OUT $exp_line."\n";		
-		#print OUT join("\t", @freq_a), "\t";
-		#print OUT join("\t", @freq_b), "\n";
+		my $outinfo = $miR_id."\t".$miR_seq."\t".$mid."\t".length($sR_seq_a)."\t".$sR_seq_a."\tNA\tNA".
+                        	"\t".$sRNA_id_b."\t".length($sR_seq_b)."\t".$sR_seq_b."\tNA\tNA";
+                $outinfo .= $exp_line."\n";
+		# print OUT join("\t", @freq_a), "\t";
+		# print OUT join("\t", @freq_b), "\n";
+
+		if ( defined $miR_best{$mid}{'best'} ) 
+		{
+			if ($high_exp_a > $miR_best{$mid}{'best'}) 
+			{
+				$miR_best{$mid}{'best'} = $high_exp_a;
+				$miR_best{$mid}{'out'} = $outinfo;
+			}
+		} 
+		else 
+		{
+			$miR_best{$mid}{'best'} = $high_exp_a;
+			$miR_best{$mid}{'out'} = $outinfo;
+		}
   	}
 }
 close(IN);
+
+foreach my $mid (sort keys %miR_best)
+{
+	print OUT $miR_best{$mid}{'out'};
+}
+
 close(OUT);
 
 #unlink($star_candidate);
