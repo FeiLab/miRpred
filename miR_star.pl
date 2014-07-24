@@ -389,8 +389,8 @@ while(<IN>)
 
 	if ( $ratio_avail == 1 && $len_diff <= $len_diff_cutoff)
 	{
-		my $outinfo = $miR_id."\t".$miR_seq."\t".$mid."\t".length($sR_seq_a)."\t".$sR_seq_a."\tNA\tNA".
-                        	"\t".$sRNA_id_b."\t".length($sR_seq_b)."\t".$sR_seq_b."\tNA\tNA";
+		my $outinfo = $miR_id."\t".$miR_seq."\t".$mid."\t".length($sR_seq_a)."\t".$sR_seq_a."\t$a[3]\t$a[4]".
+                        	"\t".$sRNA_id_b."\t".length($sR_seq_b)."\t".$sR_seq_b."\t$a[5]\t$a[6]";
                 $outinfo .= $exp_line."\n";
 		# print OUT join("\t", @freq_a), "\t";
 		# print OUT join("\t", @freq_b), "\n";
